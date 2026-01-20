@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 -u
 import argparse
 import sys
 import asyncio
@@ -10,61 +10,106 @@ import evdev
 from evdev import InputDevice, categorize, ecodes
 from obswebsocket import obsws, requests
 
-# --- Configuration & Constants ---
+
 LONG_PRESS_THRESHOLD = 1.0
-RECONNECT_DELAY = 5
+RECONNECT_DELAY = 2
 OBS_EXEC = "obs"
-TOGGLE_COOLDOWN = 2.0  # Seconds to ignore holds after a toggle action
+TOGGLE_COOLDOWN = 2.0
 
 
 def get_args():
     parser = argparse.ArgumentParser(
-            description="Advanced OBS Smart Controller")
+        description="Advanced OBS Smart Controller"
+    )
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=4455)
     parser.add_argument("--password", default="")
     parser.add_argument(
-            "--code", type=int, required=True, help="Input code (e.g. 28)")
+        "--code",
+        type=int,
+        required=True,
+        help="Input code (e.g. 28)"
+    )
     return parser.parse_args()
 
 
 class OBSController:
     def __init__(self, args):
         self.args = args
-        self.client = obsws(args.host, port=args.port, password=args.password)
+        self.client = obsws(
+            args.host,
+            port=args.port,
+            password=args.password
+        )
         self.connected = False
         self.active_devices = {}
         self.long_press_active = False
         self.last_toggle_time = 0
 
     def is_obs_running(self):
-        """Checks if the obs process exists and is not a zombie/terminating."""
-        for proc in psutil.process_iter(['name', 'status']):
+        """Check if the obs process exists and is not zombie."""
+        for proc in psutil.process_iter(['name', 'status', 'pid', 'exe']):
             try:
-                if proc.info['name'] and 'obs' in proc.info['name'].lower():
-                    # Ignore processes that are already dying
+                proc_name = proc.info['name']
+                if not proc_name:
+                    continue
+
+                proc_name_lower = proc_name.lower()
+
+                # Skip this script's process
+                if proc.info['pid'] == os.getpid():
+                    continue
+
+                # Skip Python processes
+                if 'python' in proc_name_lower:
+                    continue
+
+                # Skip our own binary (obs-remote)
+                if 'obs-remote' in proc_name_lower:
+                    continue
+
+                # Look for actual OBS process
+                if 'obs' in proc_name_lower:
                     if proc.info['status'] in [
-                            psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
+                        psutil.STATUS_ZOMBIE,
+                        psutil.STATUS_DEAD
+                    ]:
                         continue
-                    return True
+                    return proc.info['pid']
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        return False
+        return None
+
+    def is_recording(self):
+        """Check if OBS is currently recording."""
+        if not self.connected:
+            return False
+        try:
+            response = self.client.call(requests.GetRecordStatus())
+            return response.datain.get('outputActive', False)
+        except Exception:
+            self.connected = False
+            return False
 
     def toggle_obs_app(self):
-        """
-            Launches or closes OBS with a cooldown
-            to prevent double-triggering.
-        """
+        """Launch or close OBS with cooldown."""
         current_time = time.time()
         if current_time - self.last_toggle_time < TOGGLE_COOLDOWN:
             return
 
         self.last_toggle_time = current_time
 
-        if self.is_obs_running():
-            print("Closing OBS gracefully via SIGINT...")
-            subprocess.run(["pkill", "-SIGINT", "obs"])
+        obs_pid = self.is_obs_running()
+        if obs_pid:
+            if self.is_recording():
+                print("Cannot close OBS: Recording is active.")
+                return
+            print(f"Closing OBS (PID {obs_pid}) gracefully...")
+            try:
+                os.kill(obs_pid, 2)
+            except ProcessLookupError:
+                pass
+            self.connected = False
         else:
             print("Launching OBS...")
             clean_env = os.environ.copy()
@@ -79,11 +124,12 @@ class OBSController:
                     env=clean_env,
                     start_new_session=True
                 )
+                self.connected = False
             except FileNotFoundError:
                 print(f"Error: Command '{OBS_EXEC}' not found.")
 
     async def connect_obs(self):
-        """Maintains the background WebSocket connection."""
+        """Maintain the background WebSocket connection."""
         while True:
             if not self.connected:
                 try:
@@ -95,7 +141,7 @@ class OBSController:
             await asyncio.sleep(RECONNECT_DELAY)
 
     async def _check_long_press(self, device_path, trigger_code):
-        """Triggers at exactly the 1s mark if key is still held."""
+        """Trigger at exactly the 1s mark if key is still held."""
         await asyncio.sleep(LONG_PRESS_THRESHOLD)
         try:
             dev = InputDevice(device_path)
@@ -107,24 +153,33 @@ class OBSController:
             pass
 
     async def handle_events(self, device, trigger_code):
-        """Handles the logic for short vs long presses."""
+        """Handle the logic for short vs long presses."""
         press_start_time = 0
         try:
             async for event in device.async_read_loop():
-                if event.type == ecodes.EV_KEY and event.code == trigger_code:
-                    if event.value == 1:  # Key Down
+                if (event.type == ecodes.EV_KEY and
+                        event.code == trigger_code):
+                    if event.value == 1:
                         press_start_time = time.time()
                         self.long_press_active = False
-                        asyncio.create_task(self._check_long_press(
-                            device.path, trigger_code))
-                    elif event.value == 0:  # Key Up
+                        asyncio.create_task(
+                            self._check_long_press(
+                                device.path,
+                                trigger_code
+                            )
+                        )
+                    elif event.value == 0:
                         if not self.long_press_active:
                             duration = time.time() - press_start_time
-                            if duration < LONG_PRESS_THRESHOLD \
-                                    and self.connected:
-                                print(f"[{device.name}] Toggle Recording.")
+                            if (duration < LONG_PRESS_THRESHOLD and
+                                    self.connected):
+                                print(
+                                    f"[{device.name}] Toggle Recording."
+                                )
                                 try:
-                                    self.client.call(requests.ToggleRecord())
+                                    self.client.call(
+                                        requests.ToggleRecord()
+                                    )
                                 except Exception:
                                     self.connected = False
         except (OSError, PermissionError):
@@ -133,18 +188,19 @@ class OBSController:
             self.active_devices.pop(device.path, None)
 
     async def watch_devices(self):
-        """Watches for newly plugged-in hardware."""
+        """Watch for newly plugged-in hardware."""
         while True:
             for path in evdev.list_devices():
                 if path not in self.active_devices:
                     try:
                         dev = InputDevice(path)
                         caps = dev.capabilities()
-                        if ecodes.EV_KEY in caps and self.args.code in caps[
-                                ecodes.EV_KEY]:
+                        if (ecodes.EV_KEY in caps and
+                                self.args.code in caps[ecodes.EV_KEY]):
                             print(f"Monitoring: {dev.name}")
-                            task = asyncio.create_task(self.handle_events(
-                                dev, self.args.code))
+                            task = asyncio.create_task(
+                                self.handle_events(dev, self.args.code)
+                            )
                             self.active_devices[path] = task
                         else:
                             dev.close()
@@ -168,7 +224,4 @@ def main_cli():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        sys.exit(0)
+    main_cli()

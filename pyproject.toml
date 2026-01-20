@@ -29,7 +29,10 @@ dependencies = [
 ]
 
 [project.scripts]
-obs-remote = "obs_remote:main_cli"
+obs-remote = "main:main_cli"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/obs-remote"
+
+[tool.hatch.build.targets.wheel]
+packages = ["main.py"]
