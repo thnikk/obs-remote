@@ -1,0 +1,106 @@
+name: Build and Release OBS Remote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Create virtual environment and install dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build executable
+      run: |
+        source venv/bin/activate
+        pyinstaller obs-remote.spec
+        mv dist/obs-remote dist/obs-remote-ubuntu
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: obs-remote-ubuntu
+        path: dist/obs-remote-ubuntu
+
+  build-archlinux:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    
+    steps:
+    - name: Install base dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm git python python-pip base-devel
+    
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Create virtual environment and install dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build executable
+      run: |
+        source venv/bin/activate
+        pyinstaller obs-remote.spec
+        mv dist/obs-remote dist/obs-remote-archlinux
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: obs-remote-archlinux
+        path: dist/obs-remote-archlinux
+
+  create-release:
+    needs: [build-ubuntu, build-archlinux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download Ubuntu artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: obs-remote-ubuntu
+        path: ./artifacts
+    
+    - name: Download Arch Linux artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: obs-remote-archlinux
+        path: ./artifacts
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ inputs.version }}
+        name: Release ${{ inputs.version }}
+        draft: false
+        prerelease: false
+        files: |
+          ./artifacts/obs-remote-ubuntu
+          ./artifacts/obs-remote-archlinux
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
