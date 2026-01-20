@@ -32,13 +32,12 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller obs-remote.spec
-        mv dist/obs-remote dist/obs-remote-ubuntu
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: obs-remote-ubuntu
-        path: dist/obs-remote-ubuntu
+        path: dist/obs-remote
 
   build-archlinux:
     runs-on: ubuntu-latest
@@ -65,13 +64,12 @@ jobs:
       run: |
         source venv/bin/activate
         pyinstaller obs-remote.spec
-        mv dist/obs-remote dist/obs-remote-archlinux
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: obs-remote-archlinux
-        path: dist/obs-remote-archlinux
+        path: dist/obs-remote
 
   create-release:
     needs: [build-ubuntu, build-archlinux]
