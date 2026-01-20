@@ -1,0 +1,3 @@
+evdev
+obs-websocket-py
+psutil
