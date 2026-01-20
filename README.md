@@ -1,6 +1,6 @@
 # OBS Remote Controller
 
-Advanced OBS Smart Controller for remote control via input devices.
+Toggle OBS recordings with an input via evdev.
 
 ## Installation
 
@@ -19,12 +19,12 @@ pipx install git+https://github.com/yourusername/obs-remote.git
 ## Usage
 
 ```bash
-obs-remote --code 28 --host localhost --port 4455 --password yourpassword
+obs-remote --code 317 --host localhost --port 4455 --password yourpassword
 ```
 
 ### Arguments
 
-- `--code`: Input event code (required, e.g., 28 for Enter key)
+- `--code`: Input event code (required, e.g., 317 for capture button on Xbox One Core controller)
 - `--host`: OBS WebSocket host (default: localhost)
 - `--port`: OBS WebSocket port (default: 4455)
 - `--password`: OBS WebSocket password (default: empty)
