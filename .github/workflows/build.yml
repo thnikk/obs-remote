@@ -82,13 +82,18 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: obs-remote-ubuntu
-        path: ./artifacts
+        path: ./ubuntu
     
     - name: Download Arch Linux artifact
       uses: actions/download-artifact@v4
       with:
         name: obs-remote-archlinux
-        path: ./artifacts
+        path: ./archlinux
+    
+    - name: Create zipped releases
+      run: |
+        cd ubuntu && zip ../obs-remote-${{ inputs.version }}-ubuntu.zip obs-remote && cd ..
+        cd archlinux && zip ../obs-remote-${{ inputs.version }}-archlinux.zip obs-remote && cd ..
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
@@ -98,7 +103,7 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          ./artifacts/obs-remote-ubuntu
-          ./artifacts/obs-remote-archlinux
+          ./obs-remote-${{ inputs.version }}-ubuntu.zip
+          ./obs-remote-${{ inputs.version }}-archlinux.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
